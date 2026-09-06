@@ -1,0 +1,16 @@
+target/
+.anchor/
+test-ledger/
+**/*.rs.bk
+
+.env
+.env.*.local
+!.env.example
+
+cairn.db
+cairn.db-*
+blobs/
+*.wav
+*.webm
+*.log
+.DS_Store
