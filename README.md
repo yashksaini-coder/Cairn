@@ -201,38 +201,36 @@ deleted blobs — both detectable, because the hash that matters is on chain.
 
 ## Running it
 
-Needs Rust 1.89+, Agave CLI 3.x, Anchor 1.2.x, and a microphone.
+Needs Rust 1.89+, the Agave CLI, and [`just`](https://github.com/casey/just).
+Anchor CLI is *not* required — Cairn doesn't use an IDL, so `cargo build-sbf`
+and `solana program deploy` are the whole toolchain.
 
 ```sh
-anchor build
-anchor keys sync        # writes the real program ID into lib.rs + Anchor.toml
-anchor build            # again, so the ID is baked in
-anchor deploy --provider.cluster devnet
+cargo install just
+just install-toolchain          # Agave
+just keys && just sync-id       # self-contained keypairs in .demo/
 
-cargo test -p cairn --test litesvm      # every state transition and every guard
+just validator                  # terminal 1
+just fund && just deploy
+just api                        # terminal 2
 ```
+
+Then, in a third:
 
 ```sh
-cp .env.example .env    # CAIRN_PROGRAM_ID is the only one you must set
-cargo run -p cairn-api
+just give <their-pubkey> 0.05 "one term of school fees"
+just sample-audio receipt.wav   # or: arecord -f cd -d 10 receipt.wav
+just receive <escrow> receipt.wav
+just verify <signature>
 ```
+
+`just` on its own lists every recipe. **[docs/COMMANDS.md](docs/COMMANDS.md)
+walks the whole loop with real terminal output at each step**, including what
+a failed verification looks like.
 
 It runs with no ElevenLabs key and no bucket — transcripts come back empty
 (still a valid receipt) and audio lands in `./blobs`. For R2, set the `R2_*`
 vars and build with `--features s3`.
-
-Then:
-
-```sh
-cargo install --path crates/cairn-cli
-export CAIRN_PROGRAM_ID=<your program id>
-
-arecord -f cd -d 10 receipt.wav         # or ffmpeg, or anything
-cairn receive --keypair ~/.config/solana/id.json --escrow <pubkey> --audio receipt.wav
-```
-
-`./demo.sh` seeds a few escrows, one of which expires in five minutes so the
-refund path has something to act on.
 
 ---
 
@@ -273,6 +271,14 @@ make it worth revisiting.
   the bare instruction names itself.
 - borsh 1.x won't guess for enums with explicit discriminants; you need
   `#[borsh(use_discriminant = true)]`.
+- `cargo-build-sbf` still defaults to `--arch v0`, and SIMD-0500 disabled
+  deployment of v0, v1 and v2. The default build produces a `.so` no current
+  cluster will accept, and only tells you at deploy time.
+- LiteSVM reuses its blockhash, so sending the same instruction twice makes a
+  byte-identical transaction that the runtime rejects as a duplicate *before
+  the program runs* — a test asserting a terminal state refuses a second
+  attempt will fail for entirely the wrong reason. `expire_blockhash()`
+  between sends.
 
 ---
 
