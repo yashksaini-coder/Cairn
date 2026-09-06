@@ -67,10 +67,15 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      - name: install anchor
-        run: cargo install --git https://github.com/coral-xyz/anchor avm --locked --force && avm install 1.2.0 && avm use 1.2.0
-      - name: build
-        run: anchor build
+      # No Anchor CLI. It exists to compile the program *and* emit an IDL,
+      # and Cairn uses no IDL -- so this is the same build without a
+      # fifteen-minute avm compile or a toolchain pin that can name a
+      # release that was never published.
+      #
+      # --arch v3 is required: cargo-build-sbf still defaults to v0, and
+      # SIMD-0500 disabled deployment of v0, v1 and v2.
+      - name: build the program
+        run: cargo build-sbf --manifest-path programs/cairn/Cargo.toml --arch v3
       # Every state transition, and a negative test per guard asserting its
       # own error code rather than just "it failed".
       - name: litesvm suite

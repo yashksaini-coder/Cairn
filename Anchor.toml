@@ -1,6 +1,12 @@
+# Deliberately unpinned. `anchor_version`/`solana_version` make `anchor build`
+# fetch those exact releases through agave-install, and a version that was
+# never published fails the build with "Unknown release" -- which is exactly
+# what a pin lifted from a planning document did here.
+#
+# Cairn does not require the Anchor CLI at all: it emits no IDL, so
+# `cargo build-sbf --arch v3` and `solana program deploy` are the whole
+# toolchain. See docs/COMMANDS.md.
 [toolchain]
-anchor_version = "1.2.0"
-solana_version = "3.1.0"
 
 [features]
 resolution = true
