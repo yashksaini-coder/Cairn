@@ -80,8 +80,52 @@ fmt:
     cargo fmt --all
 
 # Clippy across the workspace, warnings as errors.
-lint:
+lint: _lint-justfile
     cargo clippy --workspace --all-targets -- -D warnings
+
+# just uses the LAST comment line before a recipe as its description, so a
+# multi-line note written directly above one silently becomes the text in
+# `just --list`. That has shipped twice now -- once as "airdrops are
+# rate-limited and Cairn never airdrops on your behalf", once as "arrives as
+# a dozen separate arguments and clap rejects the second one" -- so it is
+# encoded here rather than remembered.
+
+# Check that every recipe's description survives `just --list`.
+_lint-justfile:
+    #!/usr/bin/env python3
+    import re, sys
+
+    lines = open("justfile").read().splitlines()
+    # A recipe line starts at column 0 and carries a `:` that is not `:=`,
+    # which is what separates it from a setting or an assignment.
+    RECIPE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*(\s[^:]*)?:(?!=)")
+
+    problems = []
+    for i, line in enumerate(lines):
+        if not RECIPE.match(line):
+            continue
+        block = 0
+        j = i - 1
+        while j >= 0 and lines[j].lstrip().startswith("#"):
+            block += 1
+            j -= 1
+        if block > 1:
+            problems.append((i + 1, line.split(":")[0].split()[0], block, lines[i - 1]))
+
+    for lineno, name, block, last in problems:
+        print(
+            f"justfile:{lineno}: `{name}` has a {block}-line comment block directly "
+            f"above it.\n"
+            f"  `just --list` will describe it as: {last.lstrip('# ').strip()!r}\n"
+            f"  Put the explanation above a blank line, and leave one line touching "
+            f"the recipe.",
+            file=sys.stderr,
+        )
+
+    if problems:
+        print(f"\n{len(problems)} recipe description(s) would be wrong.", file=sys.stderr)
+        sys.exit(1)
+    print("justfile: every recipe description survives `just --list`")
 
 # Unit tests. The state machine lives in test-program.
 test:

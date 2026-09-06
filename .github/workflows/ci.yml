@@ -21,6 +21,13 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
 
+      # The justfile's own descriptions are the discovery surface for every
+      # command in the project, and just silently takes only the last comment
+      # line before a recipe. Checked here so `just check` really is CI.
+      - uses: extractions/setup-just@v2
+      - name: justfile descriptions
+        run: just _lint-justfile
+
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
