@@ -1,0 +1,42 @@
+app = "cairn-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "crates/cairn-api/Dockerfile"
+
+[env]
+  BIND = "0.0.0.0:8080"
+  DATABASE_URL = "sqlite:///data/cairn.db?mode=rwc"
+  BLOB_DIR = "/data/blobs"
+  SOLANA_RPC_URL = "https://api.devnet.solana.com"
+  INDEX_INTERVAL_SECS = "3"
+
+# Set with `fly secrets set`:
+#   CAIRN_PROGRAM_ID, ELEVENLABS_API_KEY,
+#   and, if using R2: R2_BUCKET R2_ENDPOINT R2_PUBLIC_BASE
+#                     AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+
+[[mounts]]
+  source = "cairn_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The indexer polls every 3s, so the machine must not be stopped between
+  # requests -- a cold read model is a stale read model.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
