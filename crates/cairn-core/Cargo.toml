@@ -1,0 +1,27 @@
+[package]
+name = "cairn-core"
+description = "Canonical hashing, PDA seeds and escrow state shared by the Cairn program, API and CLI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Enabled by the host-side consumers (API, CLI, tests). The on-chain program
+# depends on this crate with `default-features = false`, so none of the
+# transcript-normalisation or serde machinery is ever linked into the SBF
+# binary -- the program only ever handles an already-computed 32-byte hash.
+host = ["dep:unicode-normalization", "dep:serde", "dep:hex"]
+
+[dependencies]
+solana-program.workspace = true
+borsh.workspace = true
+unicode-normalization = { version = "0.1", optional = true }
+serde = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+
+# A package may dev-depend on itself to switch a feature on for its own test
+# build. This is what lets the unit tests exercise `normalize` and `need_hash`
+# while the SBF build never sees them.
+[dev-dependencies]
+cairn-core = { path = ".", features = ["host"] }
