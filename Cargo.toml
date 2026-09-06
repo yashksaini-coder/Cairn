@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cairn-core",
+    "crates/cairn-api",
+    "crates/cairn-cli",
+    "programs/cairn",
+]
+
+# One place to bump every shared version.
+#
+# The Solana crate split is mid-flight and its generations do not interoperate.
+# If a bump ever produces `expected solana_pubkey::Pubkey, found Address` --
+# two types with the same name and no conversion between them -- it means
+# something in the tree resolved to the other generation. See the version
+# table in docs/ARCHITECTURE.md before touching anything else.
+[workspace.dependencies]
+anchor-lang = "1.2"
+solana-program = "3"
+# MUST match the borsh major that `anchor-lang` re-exports as
+# AnchorSerialize/AnchorDeserialize. If `programs/cairn/src/state.rs` fails to
+# compile with "the trait AnchorSerialize is not implemented for
+# cairn_core::state::Escrow", this pin is the fix -- nothing else.
+borsh = { version = "1.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+hex = "0.4"
+bs58 = "0.5"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls"] }
+
+cairn-core = { path = "crates/cairn-core" }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/yashksaini/cairn"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+# Keeps iteration inside the 19h budget (§14: "Rust compile times erode the
+# schedule"). Dependencies are still optimised, our crates are not.
+[profile.dev.package."*"]
+opt-level = 3
