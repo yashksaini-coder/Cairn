@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The LiteSVM suite needs a built .so, which needs the Solana toolchain;
+      # it runs in the `program` job below. Everything else runs here.
+      - name: unit tests
+        run: cargo test --workspace --exclude cairn
+
+      # The heavy optional dependency has to compile somewhere or it rots.
+      - name: build with s3
+        run: cargo build -p cairn-api --features s3
+
+  # The whole claim is that one hash implementation serves the chain and the
+  # host. This job is what makes that a fact rather than an intention.
+  portability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install the solana toolchain
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - name: cairn-core builds for SBF
+        run: cargo build-sbf --manifest-path crates/cairn-core/Cargo.toml
+      - name: cairn-core builds for the host
+        run: cargo build -p cairn-core --features host
+
+  program:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install the solana toolchain
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - name: install anchor
+        run: cargo install --git https://github.com/coral-xyz/anchor avm --locked --force && avm install 1.2.0 && avm use 1.2.0
+      - name: build
+        run: anchor build
+      # Every state transition, and a negative test per guard asserting its
+      # own error code rather than just "it failed".
+      - name: litesvm suite
+        run: cargo test -p cairn --test litesvm
+
