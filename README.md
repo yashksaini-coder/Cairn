@@ -17,6 +17,16 @@ cairn receive  --escrow <pubkey> --audio receipt.wav     # they run this
 cairn verify   <signature>                               # anyone runs this
 ```
 
+<div align="center">
+  <img src="assets/demo.gif" alt="A terminal session: funds are locked against a description, the recipient records a receipt and releases them, verification passes, the stored recording is altered, and verification then fails." width="100%">
+</div>
+
+A real session against a local validator — the escrow is created on chain, the
+receipt is signed by the recipient's key, and the failure at the end is a
+genuine hash mismatch after the stored recording is altered. Also available as
+[mp4](assets/demo.mp4), or replay it yourself with
+`asciinema play assets/demo.cast`.
+
 ---
 
 ## The itch

@@ -29,6 +29,8 @@ Two things about that run, stated up front so nothing below misleads:
 - [Verifying without trusting the server](#verifying-without-trusting-the-server)
 - [When the program says no](#when-the-program-says-no)
 - [Tests](#tests)
+- [Git hooks](#git-hooks)
+- [Re-recording the demo](#re-recording-the-demo)
 - [Every recipe](#every-recipe)
 - [Devnet instead of local](#devnet-instead-of-local)
 - [Troubleshooting](#troubleshooting)
@@ -248,6 +250,63 @@ ever passes for an impostor, Cairn has no trust model.
 
 ---
 
+## Git hooks
+
+```sh
+just hooks
+```
+
+That points `core.hooksPath` at `.githooks/`, which is versioned with the
+project — so the hooks arrive with a clone instead of having to be
+reinstalled by hand in every checkout.
+
+**`pre-commit`** is deliberately fast. A hook that takes a minute gets
+bypassed with `--no-verify` on the second day.
+
+- Refuses staged secrets. A Solana keypair is a JSON array of 64 bytes and can
+  be committed under any filename at all, so the check is on the *shape* of
+  the file, not its path. It also refuses `.env` and anything under `.demo/`.
+- `cargo fmt --check`, but only when Rust actually changed.
+- The justfile description lint, when the justfile changed.
+
+**`pre-push`** runs the full gate — the same `just check` that CI runs. If the
+Agave toolchain isn't installed it skips the on-chain suite and says so,
+rather than blocking a push over a missing optional dependency and teaching
+you to reach for `--no-verify`.
+
+Both print what to run to fix what they caught.
+
+---
+
+## Re-recording the demo
+
+The GIF in the README is a real session, not a mock-up. To regenerate it:
+
+```sh
+just validator      # terminal 1
+just api            # terminal 2
+just record-demo    # terminal 3
+```
+
+That produces three files in `assets/`:
+
+| File | What it's for |
+|---|---|
+| `demo.cast` | the asciinema recording — replayable, and small enough to diff |
+| `demo.gif` | what the README embeds |
+| `demo.mp4` | the same thing, smaller and seekable |
+
+`scripts/record-demo.sh` drives the session and `scripts/encode-demo.sh`
+records and encodes it. Encoding needs [`asciinema`](https://asciinema.org)
+and [`agg`](https://github.com/asciinema/agg); both are overridable via
+`$ASCIINEMA` and `$AGG` since neither ships in most distro repos.
+
+`SKIP_RECORD=1 ./scripts/encode-demo.sh` re-encodes the existing cast without
+touching the chain — useful when you're adjusting the theme or framerate and
+don't want to mint a new escrow for every change.
+
+---
+
 ## Every recipe
 
 | Recipe | What it does |
@@ -276,6 +335,10 @@ ever passes for an impostor, Cairn has no trust model.
 | `just hash need <text>` / `just hash receipt …` | offline recomputation |
 | `just sample-audio [out] [seconds]` | generate a placeholder WAV |
 | `just seed` | create several escrows via `demo.sh` |
+| `just hooks` | point git at the versioned hooks in `.githooks/` |
+| `just demo-tamper <escrow>` | corrupt the stored recording, so `verify` catches it |
+| `just record-demo` | re-record and encode the README demo |
+| `just fmt-check` | verify formatting without rewriting |
 | `just clean` | `cargo clean` plus the local DB and blobs |
 | `just reset-chain` | drop the ledger, DB and blobs; keep the keypairs |
 
@@ -335,3 +398,8 @@ supported path, not a fault; the API logs a warning at boot.
 
 **`just hash need` complains about an unexpected argument.** You're on an old
 checkout — the recipe used to word-split its arguments.
+
+**`anchor build` fails with `Unknown release: 3.1.0`.** `Anchor.toml` used to
+pin `solana_version` to a release that was never published, and `anchor build`
+tries to fetch exactly what it is told. The pin is gone, and nothing in this
+project needs the Anchor CLI anyway.
