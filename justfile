@@ -30,11 +30,11 @@ _default:
 
 # ---------------------------------------------------------------- setup
 
-# Install the Agave toolchain (Anchor CLI is not required -- see docs/COMMANDS.md).
+# Install the Agave toolchain. Anchor CLI is not required.
 install-toolchain:
     sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
 
-# Generate the program, donor and recipient keypairs into .demo/ (gitignored).
+# Generate program/donor/recipient keypairs into .demo/ (gitignored).
 keys:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -51,7 +51,7 @@ keys:
 
 # This is `anchor keys sync`, done without needing Anchor installed.
 
-# Write the program keypair's pubkey into lib.rs and Anchor.toml.
+# Write the program pubkey into lib.rs and Anchor.toml.
 sync-id: keys
     #!/usr/bin/env bash
     set -euo pipefail
@@ -62,6 +62,7 @@ sync-id: keys
 
 # ---------------------------------------------------------------- build & check
 
+# Compile the whole workspace for the host.
 build:
     cargo build --workspace
 
@@ -70,21 +71,23 @@ build:
 # so the default build produces a .so that nothing will accept, and says so
 # only at deploy time as "sbpf_version ... not enabled".
 
-# Compile the program to SBF. Emits target/deploy/cairn.so.
+# Compile the program to SBF (--arch v3).
 build-program:
     cargo build-sbf --manifest-path programs/cairn/Cargo.toml --arch v3
 
+# Format every crate.
 fmt:
     cargo fmt --all
 
+# Clippy across the workspace, warnings as errors.
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Unit tests. The LiteSVM suite needs a built .so -- see test-program.
+# Unit tests. The state machine lives in test-program.
 test:
     cargo test --workspace --exclude cairn
 
-# Every state transition and every guard, in-process.
+# Every state transition and guard, in a real VM.
 test-program: build-program
     cargo test -p cairn --test litesvm
 
@@ -94,7 +97,7 @@ check: fmt lint test test-program
 
 # ---------------------------------------------------------------- chain
 
-# Start a local validator. Leave it running in its own terminal.
+# Run a local validator. Leave it in its own terminal.
 validator:
     solana-test-validator --reset --quiet --ledger {{ keys }}/ledger
 
@@ -102,7 +105,7 @@ validator:
 # airdrops on your behalf -- a failed airdrop mid-demo looks exactly like a
 # broken program.
 
-# Put SOL in the donor and recipient wallets.
+# Airdrop to the donor and recipient. Local only.
 fund amount="10":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -145,20 +148,21 @@ _cli := "cargo run --quiet -p cairn-cli --"
 # Everything the CLI needs to reach the right chain and server.
 _env := "CAIRN_PROGRAM_ID=$(solana address -k " + program_kp + ") SOLANA_RPC_URL=" + rpc + " CAIRN_API_URL=" + api_url
 
-# Lock funds for someone.  just give <pubkey> 0.05 "one term of school fees"
+# Lock funds for someone, against a description.
 give to amount description window="24h":
     @env {{ _env }} {{ _cli }} give --keypair {{ donor }} --to "{{ to }}" \
       --amount "{{ amount }}" --for "{{ description }}" --window "{{ window }}"
 
-# Record a receipt and release the funds.  just receive <escrow> receipt.wav
+# Record a receipt and release the funds.
 receive escrow audio="receipt.wav":
     @env {{ _env }} {{ _cli }} receive --keypair {{ recipient }} \
       --escrow "{{ escrow }}" --audio "{{ audio }}" --yes
 
-# Take back an expired escrow.  just refund <escrow>
+# Take back an expired escrow.
 refund escrow:
     @env {{ _env }} {{ _cli }} refund --keypair {{ donor }} --escrow "{{ escrow }}"
 
+# List escrows. Filters: --donor --recipient --state --expired
 list *args:
     @env {{ _env }} {{ _cli }} list "$@"
 
@@ -170,9 +174,10 @@ show escrow:
 verify signature:
     @env {{ _env }} {{ _cli }} verify "{{ signature }}"
 
-# Recompute a hash offline. No server, no key, no network.
 # `"$@"`, not `{{ args }}`: the latter word-splits, so a quoted description
 # arrives as a dozen separate arguments and clap rejects the second one.
+
+# Recompute a hash offline. No server, no key, no network.
 hash *args:
     @env {{ _env }} {{ _cli }} hash "$@"
 
@@ -180,7 +185,7 @@ hash *args:
 
 # Real use is a microphone: arecord -f cd -d 10 receipt.wav
 
-# Generate a placeholder WAV to stand in for a recording.
+# Generate a placeholder WAV in place of a recording.
 sample-audio out="receipt.wav" seconds="6":
     @ffmpeg -y -loglevel error -f lavfi -i "sine=frequency=220:duration={{ seconds }}" \
       -ac 1 -ar 16000 -c:a pcm_s16le "{{ out }}"
@@ -194,11 +199,12 @@ seed: keys
 
 # ---------------------------------------------------------------- housekeeping
 
+# cargo clean, plus the local database and blobs.
 clean:
     cargo clean
     rm -f cairn.db cairn.db-shm cairn.db-wal
     rm -rf blobs
 
-# Delete the local chain state and start over. Keeps the keypairs.
+# Drop the ledger, database and blobs. Keeps the keypairs.
 reset-chain:
     rm -rf {{ keys }}/ledger cairn.db cairn.db-shm cairn.db-wal blobs
