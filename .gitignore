@@ -14,3 +14,6 @@ blobs/
 *.webm
 *.log
 .DS_Store
+
+# Self-contained demo keypairs and program id. Never commit keys.
+.demo/
