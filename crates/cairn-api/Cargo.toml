@@ -1,0 +1,54 @@
+[package]
+name = "cairn-api"
+description = "Cairn's read model, receipt pipeline and independent verifier. Holds no keys."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "cairn_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cairn-api"
+path = "src/main.rs"
+
+[features]
+default = []
+# Cloudflare R2 (or any S3-compatible bucket). Off by default so local
+# development and CI compile without dragging in the AWS SDK -- §14 flags
+# Rust compile times as the highest-likelihood schedule risk, and this is the
+# single heaviest dependency in the tree.
+s3 = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
+
+[dependencies]
+cairn-core = { workspace = true, features = ["host"] }
+solana-program.workspace = true
+
+axum = { version = "0.8", features = ["multipart", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "limit"] }
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# `macros` is what provides `#[derive(FromRow)]` and the `migrate!` macro --
+# neither of which touches a database at build time. The ones that *do* are
+# `query!`/`query_as!`, and this codebase deliberately uses the runtime
+# `query`/`query_as` functions instead so Docker and CI build without a
+# live SQLite file to introspect.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+ed25519-dalek = "2"
+bs58.workspace = true
+base64 = "0.22"
+hex.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rand = "0.8"
+
+aws-sdk-s3 = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+aws-credential-types = { version = "1", optional = true }
