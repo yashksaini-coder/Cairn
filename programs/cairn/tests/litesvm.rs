@@ -62,6 +62,14 @@ impl World {
             panic!("run `anchor build` first -- could not load {PROGRAM_SO}: {e}")
         });
 
+        // LiteSVM starts its clock at unix timestamp 0. The program stores
+        // `released_at = now`, and zero is the sentinel for "not released",
+        // so a 1970 clock makes a legitimately released escrow fail its own
+        // invariant. Start where a real cluster could actually be.
+        let mut clock = svm.get_sysvar::<Clock>();
+        clock.unix_timestamp = 1_757_000_000;
+        svm.set_sysvar::<Clock>(&clock);
+
         let donor = Keypair::new();
         let recipient = Keypair::new();
         svm.airdrop(&donor.pubkey(), 100 * SOL).unwrap();
@@ -112,6 +120,14 @@ impl World {
     }
 
     fn send(&mut self, ix: Instruction, signers: &[&Keypair]) -> Result<(), TransactionError> {
+        // A real client fetches a fresh blockhash per call. Without this, two
+        // identical instructions from the same signer produce a byte-identical
+        // transaction, and the runtime rejects the second as a duplicate
+        // signature *before the program runs* -- so a test asserting that a
+        // terminal state refuses a second attempt would pass for entirely the
+        // wrong reason, or, as here, fail with AlreadyProcessed.
+        self.svm.expire_blockhash();
+
         let payer = signers[0].pubkey();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
