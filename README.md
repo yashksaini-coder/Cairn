@@ -8,8 +8,6 @@ A weekend build. Lock some SOL for someone; they only get it by signing a
 transaction that carries the hash of a voice recording saying what they
 received.
 
-Devnet. Not audited. About 4,500 lines of Rust, of which 400 are the test
-suite, and no frontend at all.
 
 ```sh
 cairn give     --to <them> --amount 0.05 --for "one term of school fees"
