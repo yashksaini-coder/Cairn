@@ -29,9 +29,9 @@ pub use state::{Escrow, EscrowState};
 
 pub use instructions::*;
 
-// PLACEHOLDER. Run `anchor keys sync` after the first `anchor build` to
-// replace this with the keypair in `target/deploy/cairn-keypair.json`, then
-// mirror it into web/.env.local and crates/cairn-api's CAIRN_PROGRAM_ID.
+// PLACEHOLDER, and deliberately left one. `just sync-id` rewrites this from
+// the keypair in .demo/, which is gitignored -- so the committed value is an
+// address nobody controls, rather than one that looks deployable and is not.
 declare_id!("5XY4DK4Hbxmk9u3ZQ45avwgxXr3LadMemB1MekfZh1JN");
 
 #[program]
