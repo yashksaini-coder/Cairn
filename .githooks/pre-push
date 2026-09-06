@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The full gate, the same one CI runs. Slower, but push is rare.
+#
+# Install with: just hooks
+set -uo pipefail
+
+command -v just >/dev/null || { echo "pre-push: just is not installed; skipping" >&2; exit 0; }
+
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+if command -v cargo-build-sbf >/dev/null; then
+  recipes="check"
+else
+  # The on-chain suite needs a compiled .so. Without the Agave toolchain it
+  # cannot run, and refusing the push over a missing optional dependency
+  # would only teach people to pass --no-verify.
+  printf '\033[33mpre-push:\033[0m no Agave toolchain; skipping the on-chain suite\n' >&2
+  recipes="fmt-check lint test"
+fi
+
+# shellcheck disable=SC2086
+if ! just $recipes; then
+  printf '\n\033[31mpre-push:\033[0m push blocked -- CI would fail on this too.\n' >&2
+  exit 1
+fi

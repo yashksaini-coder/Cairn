@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Fast checks only. A pre-commit hook that takes a minute gets bypassed with
+# --no-verify on the second day, so the slow suite lives in pre-push.
+#
+# Install with: just hooks
+set -uo pipefail
+
+fail=0
+say() { printf '\033[31mpre-commit:\033[0m %s\n' "$1" >&2; fail=1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1. Secrets. This project deals in keypairs, and a Solana keypair is just a
+#    JSON array of 64 bytes -- it can be committed under any filename at all,
+#    so the shape is what gets checked, not the path.
+while IFS= read -r file; do
+  [ -f "$file" ] || continue
+  case "$file" in
+    .env|*/.env|.env.local|*/.env.local)
+      say "$file looks like a real environment file. Commit .env.example instead." ;;
+    .demo/*)
+      say "$file is demo state and holds keypairs. It is gitignored for a reason." ;;
+  esac
+  # Only bother reading small files; a keypair is ~230 bytes.
+  if [ "$(wc -c <"$file")" -lt 4096 ] &&
+     grep -qE '^\[[[:space:]]*([0-9]{1,3},[[:space:]]*){63}[0-9]{1,3}[[:space:]]*\]$' "$file" 2>/dev/null; then
+    say "$file contains a 64-byte array -- that is a private key. Not committing it."
+  fi
+done <<< "$staged"
+
+# 2. Formatting, but only if Rust changed.
+if grep -qE '\.rs$' <<< "$staged"; then
+  if ! cargo fmt --all -- --check >/dev/null 2>&1; then
+    say "unformatted Rust. Run: just fmt"
+  fi
+fi
+
+# 3. The justfile's own descriptions, which just silently truncates.
+if grep -qx 'justfile' <<< "$staged"; then
+  just _lint-justfile >/dev/null 2>&1 || say "justfile descriptions are wrong. Run: just _lint-justfile"
+fi
+
+[ "$fail" -eq 0 ] || printf '\nCommit blocked. Override with --no-verify if you are certain.\n' >&2
+exit "$fail"
