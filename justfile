@@ -79,6 +79,13 @@ build-program:
 fmt:
     cargo fmt --all
 
+# A gate that edits the tree it is gating is not a gate, so `check` uses this
+# and `fmt` stays a convenience for you.
+
+# Verify formatting without changing anything.
+fmt-check:
+    cargo fmt --all -- --check
+
 # Clippy across the workspace, warnings as errors.
 lint: _lint-justfile
     cargo clippy --workspace --all-targets -- -D warnings
@@ -136,7 +143,7 @@ test-program: build-program
     cargo test -p cairn --test litesvm
 
 # What CI runs. Run this before you push.
-check: fmt lint test test-program
+check: fmt-check lint test test-program
     @echo "all clear"
 
 # ---------------------------------------------------------------- chain
@@ -248,6 +255,34 @@ clean:
     cargo clean
     rm -f cairn.db cairn.db-shm cairn.db-wal
     rm -rf blobs
+
+# pre-commit refuses staged secrets and unformatted code; pre-push runs the
+# full gate. Both live in .githooks/ so they are versioned with the project.
+
+# Install the git hooks.
+hooks:
+    @git config core.hooksPath .githooks
+    @echo "hooks installed: $(git config core.hooksPath)"
+
+# Touches only the local, gitignored blob store, and exists so the verifier's
+# mismatch path can be demonstrated rather than merely described.
+
+# Corrupt the stored recording for an escrow, so `just verify` catches it.
+demo-tamper escrow:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hash=$(curl -sf "{{ api_url }}/v1/escrows/{{ escrow }}" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["receipt"]["audio_key"])')
+    printf 'not the recording that was signed for' \
+      | dd of="blobs/$hash" bs=1 seek=64 conv=notrunc status=none
+    echo "altered blobs/$hash"
+
+# Needs `just validator` and `just api` already running. Produces the .cast,
+# the GIF the README embeds, and an mp4.
+
+# Record the demo end to end and encode it.
+record-demo:
+    ./scripts/encode-demo.sh
 
 # Drop the ledger, database and blobs. Keeps the keypairs.
 reset-chain:
