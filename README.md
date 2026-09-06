@@ -21,10 +21,7 @@ cairn verify   <signature>                               # anyone runs this
 
 A real session against a local validator — the escrow is created on chain, the
 receipt is signed by the recipient's key, and the failure at the end is a
-genuine hash mismatch after the stored recording is altered. Also available as
-[mp4](assets/demo.mp4), or replay it yourself with
-`asciinema play assets/demo.cast`.
-
+genuine hash mismatch after the stored recording is altered.
 ---
 
 ## The itch
