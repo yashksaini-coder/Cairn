@@ -213,7 +213,7 @@ async fn verify(api: &str, signature: &str) -> Result<()> {
         Verdict::AudioUnavailable | Verdict::ArtifactsUnknown => ("PARTIAL", YELLOW),
     };
     println!("{}", paint(colour, &format!("  {mark}  {}", verdict_name(result.verdict))));
-    println!("  {}\n", dim(&wrap(&result.detail, 68, "       ")));
+    println!("  {}\n", dim(&wrap(&result.detail, 68, "  ")));
 
     if let Some(h) = &result.onchain_receipt_hash {
         kv("committed on chain", h);
@@ -476,7 +476,7 @@ async fn give(
         )
     );
     kv("escrow", &escrow.to_string());
-    kv("tx", &explorer(&signature));
+    kv("tx", &explorer(rpc.url(), &signature));
 
     // The API only accepts text that hashes to the value already on chain, so
     // this call can supply a description but can never contradict one.
@@ -630,7 +630,7 @@ async fn receive(
 
     let signature = submit(rpc, ix, &me).await?;
     println!("  {}", paint(GREEN, &format!("✓ {} released to you", sol(row.amount))));
-    kv("tx", &explorer(&signature));
+    kv("tx", &explorer(rpc.url(), &signature));
     println!("\n  {}", dim(&format!("anyone can now check it:  cairn verify {signature}")));
     Ok(())
 }
@@ -658,7 +658,7 @@ async fn refund(
 
     let signature = submit(rpc, ix, &donor).await?;
     println!("  {}", paint(GREEN, "✓ refunded"));
-    kv("tx", &explorer(&signature));
+    kv("tx", &explorer(rpc.url(), &signature));
     Ok(())
 }
 
@@ -778,25 +778,48 @@ fn mime_for(path: &std::path::Path) -> &'static str {
     }
 }
 
-/// Read a canonical WAV header and work out how long the recording actually
-/// is, rather than taking the caller's word for it.
+/// Work out how long a recording actually is, rather than taking the
+/// caller's word for it.
 ///
-/// Only WAV, and only the canonical layout `arecord` and `ffmpeg` emit. For
-/// anything else this returns `None` and the server falls back to its byte
-/// floor -- which is the honest answer, because a duration this tool cannot
-/// verify is a duration it should not assert.
+/// Walks the RIFF chunk list instead of assuming the textbook layout. A real
+/// file is not `RIFF | WAVE | fmt | data`: ffmpeg puts a LIST/INFO chunk in
+/// the middle, and reading the data length from a fixed offset picks up that
+/// chunk's size instead -- which reported 0 ms for a valid six-second file and
+/// got it rejected as too short.
+///
+/// Only WAV. Anything else returns `None` and the server falls back to its
+/// byte floor, which is the honest answer: a duration this tool cannot verify
+/// is one it should not assert.
 fn wav_duration_ms(bytes: &[u8]) -> Option<i64> {
-    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return None;
     }
-    // Length was checked above, so these slices cannot be short.
-    let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap()) as u64;
-    let byte_rate = u32_at(28);
-    let data_len = u32_at(40);
-    if byte_rate == 0 {
-        return None;
+    let u32_at = |i: usize| -> Option<u32> {
+        bytes.get(i..i + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()))
+    };
+
+    let mut byte_rate: Option<u32> = None;
+    let mut data_len: Option<usize> = None;
+    let mut pos = 12usize;
+
+    while pos + 8 <= bytes.len() {
+        let id = &bytes[pos..pos + 4];
+        let size = u32_at(pos + 4)? as usize;
+        let body = pos + 8;
+        match id {
+            b"fmt " if size >= 16 => byte_rate = u32_at(body + 8),
+            // Clamped to the bytes actually present. A declared length is as
+            // forgeable as the duration the client sends, so it only ever
+            // shortens the answer, never lengthens it.
+            b"data" => data_len = Some(size.min(bytes.len().saturating_sub(body))),
+            _ => {}
+        }
+        // Chunks are word-aligned; an odd size carries a pad byte.
+        pos = body.saturating_add(size).saturating_add(size & 1);
     }
-    Some((data_len * 1000 / byte_rate) as i64)
+
+    let byte_rate = byte_rate.filter(|r| *r > 0)?;
+    Some(data_len? as i64 * 1000 / byte_rate as i64)
 }
 
 // -------------------------------------------------------------------- display
@@ -809,9 +832,14 @@ const RED: &str = "\x1b[31m";
 
 fn colour() -> bool {
     use std::io::IsTerminal;
-    // Honours https://no-color.org. Piping into a file should give you plain
-    // text, not escape codes.
-    std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal()
+    // https://no-color.org wins over everything, then CLICOLOR_FORCE, then
+    // whether stdout is actually a terminal. The force override exists
+    // because piping into `less -R`, a CI log, or a screenshot renderer is
+    // not the same thing as piping into a file.
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    std::env::var_os("CLICOLOR_FORCE").is_some() || std::io::stdout().is_terminal()
 }
 
 fn paint(code: &str, text: &str) -> String {
@@ -827,7 +855,11 @@ fn dim(text: &str) -> String {
 }
 
 fn kv(label: &str, value: &str) {
-    println!("  {:<20} {value}", dim(label));
+    // Pad first, colour second. `{:<20}` counts bytes, and a dimmed label
+    // carries seven bytes of escape codes -- so padding the coloured string
+    // silently stops aligning the moment a label runs past thirteen visible
+    // characters.
+    println!("  {} {value}", dim(&format!("{label:<20}")));
 }
 
 fn short(value: &str) -> String {
@@ -915,8 +947,37 @@ fn verdict_name(v: Verdict) -> &'static str {
     }
 }
 
-fn explorer(signature: &str) -> String {
-    format!("https://explorer.solana.com/tx/{signature}?cluster=devnet")
+/// An explorer link for whichever cluster the RPC endpoint actually points
+/// at.
+///
+/// This used to hardcode devnet, which is silently wrong the moment anyone
+/// runs against a local validator -- the link resolves, shows nothing, and
+/// looks like the transaction failed.
+fn explorer(rpc_url: &str, signature: &str) -> String {
+    let base = format!("https://explorer.solana.com/tx/{signature}");
+    if rpc_url.contains("devnet") {
+        format!("{base}?cluster=devnet")
+    } else if rpc_url.contains("testnet") {
+        format!("{base}?cluster=testnet")
+    } else if rpc_url.contains("localhost") || rpc_url.contains("127.0.0.1") {
+        // The explorer can talk to a local validator, but only if it is told
+        // where to look.
+        format!("{base}?cluster=custom&customUrl={}", urlencode(rpc_url))
+    } else {
+        base
+    }
+}
+
+/// Percent-encodes the handful of characters that matter in a query value.
+/// Not a general-purpose encoder, and does not need to be.
+fn urlencode(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            other => format!("%{:02X}", other as u32),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -924,10 +985,22 @@ mod tests {
     use super::*;
 
     fn wav(sample_rate: u32, channels: u16, bits: u16, data_len: u32) -> Vec<u8> {
+        wav_with_extra_chunk(sample_rate, channels, bits, data_len, None)
+    }
+
+    /// `extra` is an interloping chunk written between `fmt ` and `data`,
+    /// which is what ffmpeg does and what a fixed-offset parser trips over.
+    fn wav_with_extra_chunk(
+        sample_rate: u32,
+        channels: u16,
+        bits: u16,
+        data_len: u32,
+        extra: Option<(&[u8; 4], &[u8])>,
+    ) -> Vec<u8> {
         let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
         let mut w = Vec::new();
         w.extend(b"RIFF");
-        w.extend((36 + data_len).to_le_bytes());
+        w.extend(0u32.to_le_bytes()); // patched below
         w.extend(b"WAVEfmt ");
         w.extend(16u32.to_le_bytes());
         w.extend(1u16.to_le_bytes());
@@ -936,9 +1009,20 @@ mod tests {
         w.extend(byte_rate.to_le_bytes());
         w.extend((channels * bits / 8).to_le_bytes());
         w.extend(bits.to_le_bytes());
+        if let Some((id, payload)) = extra {
+            w.extend(id);
+            w.extend((payload.len() as u32).to_le_bytes());
+            w.extend(payload);
+            if payload.len() % 2 == 1 {
+                w.push(0);
+            }
+        }
         w.extend(b"data");
         w.extend(data_len.to_le_bytes());
-        w.resize(44 + data_len as usize, 0);
+        let header = w.len();
+        w.resize(header + data_len as usize, 0);
+        let riff = (w.len() - 8) as u32;
+        w[4..8].copy_from_slice(&riff.to_le_bytes());
         w
     }
 
@@ -951,15 +1035,39 @@ mod tests {
     }
 
     #[test]
+    fn survives_a_chunk_it_does_not_recognise() {
+        // The regression. ffmpeg writes LIST/INFO between `fmt ` and `data`,
+        // so a parser reading the data length from offset 40 gets the LIST
+        // chunk's size and reports 0 ms for a real recording.
+        let ten_seconds = wav_with_extra_chunk(
+            44_100,
+            2,
+            16,
+            176_400 * 10,
+            Some((b"LIST", b"INFOISFT\x0e\x00\x00\x00Lavf62.3.100\x00")),
+        );
+        assert_eq!(wav_duration_ms(&ten_seconds), Some(10_000));
+    }
+
+    #[test]
+    fn a_lying_header_cannot_inflate_the_duration() {
+        // The declared data length is as forgeable as the duration the client
+        // sends, so it is clamped to the bytes actually present.
+        let mut truncated = wav(44_100, 2, 16, 176_400 * 10);
+        truncated.truncate(44 + 176_400); // header claims 10s, file holds 1s
+        assert_eq!(wav_duration_ms(&truncated), Some(1_000));
+    }
+
+    #[test]
     fn declines_to_guess_at_anything_else() {
         // The point of returning None is that the server then falls back to
         // its byte floor. A duration this tool cannot verify is one it must
         // not assert.
         assert_eq!(wav_duration_ms(b"not audio at all"), None);
         assert_eq!(wav_duration_ms(&[0u8; 200]), None);
-        let mut truncated = wav(44_100, 2, 16, 1000);
-        truncated.truncate(20);
-        assert_eq!(wav_duration_ms(&truncated), None);
+        let mut headerless = wav(44_100, 2, 16, 1000);
+        headerless.truncate(20);
+        assert_eq!(wav_duration_ms(&headerless), None);
         // A header claiming a zero byte rate would divide by zero.
         assert_eq!(wav_duration_ms(&wav(0, 0, 0, 1000)), None);
     }
