@@ -1,0 +1,33 @@
+[package]
+name = "cairn-cli"
+description = "Cairn's entire client. Funds escrows, records receipts, releases funds, and verifies any of it offline."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cairn"
+path = "src/main.rs"
+
+[dependencies]
+cairn-core = { workspace = true, features = ["host"] }
+# Reuses the API's wire types and RPC client rather than mirroring them. When
+# the client was a browser this was impossible and every response shape existed
+# twice; now a change to a response breaks the CLI at compile time.
+cairn-api = { path = "../cairn-api" }
+# ...and the program's own instruction types, so a change to an argument list
+# is a Rust error here rather than a failed transaction on devnet.
+cairn = { path = "../../programs/cairn", features = ["no-entrypoint"] }
+anchor-lang.workspace = true
+
+solana-program.workspace = true
+solana-sdk = "4"
+bincode = "1.3"
+clap = { version = "4", features = ["derive", "env"] }
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+hex.workspace = true
+rand = "0.8"
