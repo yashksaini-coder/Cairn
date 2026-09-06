@@ -1,0 +1,46 @@
+[package]
+name = "cairn"
+description = "Cairn escrow program: custody, recipient-gated release, receipt-hash commitment."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "cairn"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+# Declared because Anchor's macro expansion tests for them. Without these,
+# every `#[program]` expansion emits an unexpected-cfg warning against *our*
+# crate, and CI builds with -D warnings.
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+
+# `target_os = "solana"` is a real target that rustc's check-cfg does not know
+# about off-chain, so the same expansion warns once per branch without this.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[dependencies]
+anchor-lang.workspace = true
+# Note the absent `features = ["host"]`. cairn-core has no default features,
+# so unicode-normalization, serde and hex never reach the SBF binary -- the
+# program only ever handles an already-computed 32-byte hash.
+cairn-core = { workspace = true }
+
+# litesvm and solana-sdk have to be from the same generation of the Solana
+# crate split as anchor-lang, or `Pubkey`, `Account` and `Transaction` resolve
+# to different types with identical names and nothing lines up. solana-sdk 3.x
+# pairs with anchor 1.0; anchor 1.2 needs the 4.x line.
+[dev-dependencies]
+litesvm = "0.16"
+solana-program.workspace = true
+solana-sdk = "4"
+cairn-core = { workspace = true, features = ["host"] }
