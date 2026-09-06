@@ -11,6 +11,35 @@ use serde_json::{json, Value};
 use solana_program::pubkey::Pubkey;
 use std::str::FromStr;
 
+/// Reduce a JSON-RPC error to one readable line.
+///
+/// A rejected transaction comes back with the entire simulation attached:
+/// account lists, balances, compute units, the lot. The part anyone wants is
+/// the program's own explanation, which Anchor has already written into the
+/// logs from the `#[msg(...)]` on the error variant -- so there is no mapping
+/// table to keep in step here, the sentence comes from the program itself.
+fn describe_error(method: &str, err: &Value) -> String {
+    if let Some(logs) = err["data"]["logs"].as_array() {
+        let lines: Vec<&str> = logs.iter().filter_map(|l| l.as_str()).collect();
+        if let Some(line) = lines.iter().find(|l| l.contains("Error Message:")) {
+            let message = line.split("Error Message:").nth(1).unwrap_or(line).trim();
+            let code = lines
+                .iter()
+                .find_map(|l| l.split("Error Number:").nth(1))
+                .and_then(|rest| rest.split('.').next())
+                .map(str::trim);
+            return match code {
+                Some(c) => format!("the program refused this: {message} (error {c})"),
+                None => format!("the program refused this: {message}"),
+            };
+        }
+    }
+    match err["message"].as_str() {
+        Some(m) => format!("rpc {method}: {m}"),
+        None => format!("rpc {method} error: {err}"),
+    }
+}
+
 #[derive(Clone)]
 pub struct Rpc {
     client: reqwest::Client,
@@ -34,6 +63,13 @@ impl Rpc {
         }
     }
 
+    /// The endpoint this client talks to. Callers use it to work out which
+    /// cluster they are on -- an explorer link is wrong on every cluster but
+    /// the one the transaction actually landed on.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     async fn call(&self, method: &str, params: Value) -> Result<Value> {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         let res: Value = self
@@ -48,7 +84,7 @@ impl Rpc {
             .with_context(|| format!("rpc {method} returned a non-JSON body"))?;
 
         if let Some(err) = res.get("error") {
-            bail!("rpc {method} error: {err}");
+            bail!("{}", describe_error(method, err));
         }
         res.get("result").cloned().ok_or_else(|| anyhow!("rpc {method} returned no result"))
     }
