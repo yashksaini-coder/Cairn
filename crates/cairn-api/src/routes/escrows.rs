@@ -5,6 +5,8 @@ use axum::{
 use cairn_core::state::EscrowState;
 use serde::Deserialize;
 use serde_json::json;
+use solana_program::pubkey::Pubkey;
+use std::str::FromStr;
 
 use crate::{
     db::{self, NeedRow},
@@ -12,6 +14,37 @@ use crate::{
     state::{now, AppState},
     views::{EscrowDetail, EscrowList, EscrowView, RegisterNeed},
 };
+
+/// The `need_hash` this escrow committed, as hex.
+///
+/// Reads the index first and falls back to the chain on a miss. The fallback
+/// is not an optimisation, it is the fix for a real race: a donor registers a
+/// description immediately after their transaction confirms, but the indexer
+/// polls every few seconds, so the row does not exist yet and the caller got
+/// a 404 for a perfectly valid escrow.
+///
+/// Asking the chain directly is also simply more correct. The read model is a
+/// cache; the account is the authority on what was committed.
+async fn committed_need_hash(s: &AppState, escrow: &str) -> ApiResult<String> {
+    if let Some(row) = db::get_escrow(&s.pool, escrow).await? {
+        return Ok(row.need_hash);
+    }
+
+    let key = Pubkey::from_str(escrow.trim())
+        .map_err(|_| ApiError::BadRequest(format!("{escrow} is not a valid pubkey")))?;
+
+    let account = s
+        .rpc
+        .account(&key)
+        .await
+        .map_err(|e| ApiError::Upstream { service: "solana-rpc", detail: e.to_string() })?
+        .ok_or_else(|| ApiError::NotFound(format!("no account exists at {escrow}")))?;
+
+    let decoded = cairn_core::Escrow::try_decode(&account.data)
+        .map_err(|e| ApiError::BadRequest(format!("{escrow} is not a Cairn escrow: {e}")))?;
+
+    Ok(hex::encode(decoded.need_hash))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -99,9 +132,7 @@ pub async fn register_need(
     State(s): State<AppState>,
     Json(body): Json<RegisterNeed>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let escrow = db::get_escrow(&s.pool, &body.escrow).await?.ok_or_else(|| {
-        ApiError::NotFound("that escrow is not indexed yet; wait for confirmation and retry".into())
-    })?;
+    let committed = committed_need_hash(&s, &body.escrow).await?;
 
     let description = cairn_core::normalize::normalize_text(&body.description);
     let title = cairn_core::normalize::normalize_text(&body.title);
@@ -110,11 +141,10 @@ pub async fn register_need(
     }
 
     let computed = hex::encode(cairn_core::need_hash_of_normalized(&description));
-    if computed != escrow.need_hash {
+    if computed != committed {
         return Err(ApiError::BadRequest(format!(
             "description does not match the need hash committed on chain \
-             (committed {}, this text hashes to {computed})",
-            escrow.need_hash
+             (committed {committed}, this text hashes to {computed})"
         )));
     }
 
