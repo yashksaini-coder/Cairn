@@ -29,10 +29,12 @@ pub use state::{Escrow, EscrowState};
 
 pub use instructions::*;
 
-// PLACEHOLDER, and deliberately left one. `just sync-id` rewrites this from
-// the keypair in .demo/, which is gitignored -- so the committed value is an
-// address nobody controls, rather than one that looks deployable and is not.
-declare_id!("5XY4DK4Hbxmk9u3ZQ45avwgxXr3LadMemB1MekfZh1JN");
+// The address this program asserts it lives at. The matching keypair is in
+// .demo/, which is gitignored, so this committed value is not one you can
+// deploy to -- `just sync-id` rewrites it from your own keypair, and
+// `just deploy` refuses to ship a binary whose declared id does not match
+// the key it is deploying with.
+declare_id!("Gt2Ki3qNfrVMzauSJNjpHf5YUck3f9rQonkfJ6sSTNiR");
 
 #[program]
 pub mod cairn {

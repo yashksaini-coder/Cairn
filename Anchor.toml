@@ -1,29 +1,26 @@
-# Deliberately unpinned. `anchor_version`/`solana_version` make `anchor build`
-# fetch those exact releases through agave-install, and a version that was
-# never published fails the build with "Unknown release" -- which is exactly
-# what a pin lifted from a planning document did here.
+# Deliberately unpinned. anchor_version/solana_version make `anchor build`
+# fetch those exact releases, and a version that was never published fails
+# with "Unknown release" -- which is what broke CI once already.
 #
-# Cairn does not require the Anchor CLI at all: it emits no IDL, so
-# `cargo build-sbf --arch v3` and `solana program deploy` are the whole
-# toolchain. See docs/COMMANDS.md.
+# Anchor rewrites this file and drops comments, so the full account lives in
+# docs/COMMANDS.md. Cairn does not require the Anchor CLI at all.
 [toolchain]
 
 [features]
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-cairn = "5XY4DK4Hbxmk9u3ZQ45avwgxXr3LadMemB1MekfZh1JN"
-
 [programs.devnet]
-cairn = "5XY4DK4Hbxmk9u3ZQ45avwgxXr3LadMemB1MekfZh1JN"
+cairn = "Gt2Ki3qNfrVMzauSJNjpHf5YUck3f9rQonkfJ6sSTNiR"
+
+[programs.localnet]
+cairn = "Gt2Ki3qNfrVMzauSJNjpHf5YUck3f9rQonkfJ6sSTNiR"
 
 [provider]
 cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
-# The suite is Rust + LiteSVM, not mocha. `anchor test` still stands up
-# surfpool, which is why M1 depends on it being installed, but the assertions
-# all run in-process.
 [scripts]
 test = "cargo test -p cairn --test litesvm -- --nocapture"
+
+[hooks]
