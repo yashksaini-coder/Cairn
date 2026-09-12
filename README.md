@@ -215,12 +215,14 @@ cargo install just
 just install-toolchain          # Agave
 just keys && just sync-id       # self-contained keypairs in .demo/
 
-just validator                  # terminal 1
-just fund && just deploy
-just api                        # terminal 2
+just up                         # validator + deploy + API, ~20s
+just demo                       # watch the whole loop run
+just down                       # stop everything
 ```
 
-Then, in a third:
+That's the GIF above, executing live.
+
+To drive it yourself instead:
 
 ```sh
 just give <their-pubkey> 0.05 "one term of school fees"

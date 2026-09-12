@@ -58,6 +58,16 @@ sync-id: keys
     id="$(solana address -k {{ program_kp }})"
     sed -i "s|declare_id!(\"[^\"]*\")|declare_id!(\"$id\")|" programs/cairn/src/lib.rs
     sed -i "s|^cairn = \"[^\"]*\"$|cairn = \"$id\"|" Anchor.toml
+
+    # Anchor and solana-cli look for the program keypair in target/deploy,
+    # which `cargo clean` deletes -- so .demo/ is the durable copy and this
+    # installs it where the other tools expect it. Without this there are two
+    # program identities: `anchor keys sync` writes one into declare_id! while
+    # `just deploy` deploys the other, and every instruction then fails with
+    # DeclaredProgramIdMismatch.
+    mkdir -p target/deploy
+    cp {{ program_kp }} target/deploy/cairn-keypair.json
+
     echo "program id: $id"
 
 # ---------------------------------------------------------------- build & check
@@ -173,6 +183,15 @@ fund amount="10":
 deploy: build-program
     #!/usr/bin/env bash
     set -euo pipefail
+    declared=$(grep -oP 'declare_id!\("\K[^"]+' programs/cairn/src/lib.rs)
+    actual=$(solana address -k {{ program_kp }})
+    if [ "$declared" != "$actual" ]; then
+      echo "declare_id! says   $declared" >&2
+      echo "deploying as       $actual" >&2
+      echo "These must match, or every instruction fails. Run: just sync-id" >&2
+      exit 1
+    fi
+
     solana program deploy target/deploy/cairn.so \
       --program-id {{ program_kp }} \
       --keypair {{ donor }} \
@@ -181,10 +200,117 @@ deploy: build-program
 
 # ---------------------------------------------------------------- run
 
+# Idempotent: skips anything already running. Everything it starts is
+# detached, logs into .demo/, and is stopped again by `just down`.
+
+# Bring the whole local stack up: validator, program, API.
+up: keys
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if solana cluster-version --url {{ rpc }} >/dev/null 2>&1; then
+      echo "validator   already running"
+    else
+      nohup solana-test-validator --reset --quiet --ledger {{ keys }}/ledger \
+        > {{ keys }}/validator.log 2>&1 < /dev/null &
+      echo $! > {{ keys }}/validator.pid
+      for _ in $(seq 1 60); do
+        solana cluster-version --url {{ rpc }} >/dev/null 2>&1 && break
+        sleep 1
+      done
+      solana cluster-version --url {{ rpc }} >/dev/null 2>&1 \
+        || { echo "validator did not start; see {{ keys }}/validator.log" >&2; exit 1; }
+      echo "validator   started"
+    fi
+
+    for who in {{ donor }} {{ recipient }}; do
+      addr=$(solana address -k "$who")
+      bal=$(solana balance "$addr" --url {{ rpc }} 2>/dev/null | awk '{print $1}')
+      case "${bal:-0}" in ''|*[!0-9.]*) bal=0 ;; esac
+      if [ "${bal%%.*}" -lt 2 ]; then
+        solana airdrop 10 "$addr" --url {{ rpc }} >/dev/null
+      fi
+    done
+    echo "wallets     funded"
+
+    # Quiet on success, but keep the output for when it is not.
+    if ! just deploy > {{ keys }}/deploy.log 2>&1; then
+      cat {{ keys }}/deploy.log >&2
+      exit 1
+    fi
+    echo "program     $(solana address -k {{ program_kp }})"
+
+    if curl -sf {{ api_url }}/healthz >/dev/null 2>&1; then
+      echo "api         already running"
+    else
+      cargo build --quiet -p cairn-api
+      CAIRN_PROGRAM_ID="$(solana address -k {{ program_kp }})" \
+      SOLANA_RPC_URL="{{ rpc }}" \
+      nohup ./target/debug/cairn-api > {{ keys }}/api.log 2>&1 < /dev/null &
+      echo $! > {{ keys }}/api.pid
+      for _ in $(seq 1 40); do
+        curl -sf {{ api_url }}/healthz >/dev/null 2>&1 && break
+        sleep 1
+      done
+      curl -sf {{ api_url }}/healthz >/dev/null 2>&1 \
+        || { echo "api did not start; see {{ keys }}/api.log" >&2; exit 1; }
+      echo "api         started"
+    fi
+
+    echo
+    echo "ready -- run: just demo"
+
+# Stop whatever `just up` started.
+down:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for svc in api validator; do
+      pidfile="{{ keys }}/$svc.pid"
+      if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        kill "$(cat "$pidfile")" 2>/dev/null && echo "$svc stopped"
+      else
+        echo "$svc not running"
+      fi
+      rm -f "$pidfile"
+    done
+
+# Show what is running and what the chain knows.
+status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if solana cluster-version --url {{ rpc }} >/dev/null 2>&1; then
+      echo "validator   up    {{ rpc }}"
+    else
+      echo "validator   down"
+    fi
+    if curl -sf {{ api_url }}/healthz >/dev/null 2>&1; then
+      n=$(curl -sf {{ api_url }}/v1/stats | python3 -c 'import json,sys; print(json.load(sys.stdin)["stats"]["escrow_count"])' 2>/dev/null || echo '?')
+      echo "api         up    {{ api_url }}  ($n escrows indexed)"
+    else
+      echo "api         down"
+    fi
+    id=$(solana address -k {{ program_kp }} 2>/dev/null || echo '-')
+    if solana account "$id" --url {{ rpc }} >/dev/null 2>&1; then
+      echo "program     deployed  $id"
+    else
+      echo "program     not deployed  ($id)"
+    fi
+
+# Runs the same script the recording uses, without recording it. Needs the
+# stack up; `just up` first.
+
+# Run the demo live in this terminal.
+demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    curl -sf {{ api_url }}/healthz >/dev/null 2>&1 \
+      || { echo "nothing is running. start it with: just up" >&2; exit 1; }
+    ./scripts/record-demo.sh
+
 # It serves the index, stores blobs and recomputes hashes. It holds no keys
 # and has no instruction it could call to move a lamport.
 
-# Start the API.
+# Start the API in the foreground.
 api:
     #!/usr/bin/env bash
     set -euo pipefail

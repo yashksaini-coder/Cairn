@@ -83,19 +83,65 @@ be. Skip it and every instruction fails with a program-id mismatch.
 
 ## Bringing up a chain
 
-Three terminals, or three backgrounded commands.
+One command. It starts a local validator, funds the wallets, builds and
+deploys the program, and starts the API:
 
 ```sh
-just validator     # terminal 1 — leave it running
-just fund          # 10 SOL each to donor and recipient
-just deploy        # builds for SBF, then deploys
-just api           # terminal 2 — leave it running
+just up
+```
+
+```
+validator   started
+wallets     funded
+program     Gt2Ki3qNfrVMzauSJNjpHf5YUck3f9rQonkfJ6sSTNiR
+api         started
+
+ready -- run: just demo
+```
+
+About twenty seconds cold, under ten warm. It's idempotent — anything already
+running is left alone — so it's safe to run whenever you're unsure what state
+you're in.
+
+```sh
+just status     # what's up, and how many escrows are indexed
+just down       # stop it all again
+```
+
+Logs go to `.demo/validator.log` and `.demo/api.log`. Both processes are
+detached, so closing the terminal doesn't kill them.
+
+`just up` prints the donor and recipient addresses, which is what you need for
+`just give`.
+
+**Then watch the whole loop run:**
+
+```sh
+just demo
+```
+
+That executes the same script the recorded demo uses — fund an escrow, inspect
+it, record a receipt and release the funds, verify, corrupt the recording,
+verify again and watch it fail. Roughly thirty seconds, and every step is real.
+
+<details>
+<summary>Running the pieces by hand instead</summary>
+
+`just up` is a convenience over these, which you can still run separately in
+their own terminals:
+
+```sh
+just validator     # foreground, terminal 1
+just fund
+just deploy
+just api           # foreground, terminal 2
 ```
 
 `just fund` airdrops on a **local validator only**. Cairn itself never
 airdrops: devnet throttles them, and a failed airdrop mid-demo is
 indistinguishable from a broken program. On devnet you fund the donor
 yourself.
+</details>
 
 `just deploy` builds with `--arch v3`. That is not a preference — see
 [Troubleshooting](#troubleshooting).
@@ -322,7 +368,11 @@ don't want to mint a new escrow for every change.
 | `just test` | unit tests |
 | `just test-program` | LiteSVM state-machine suite |
 | `just check` | fmt + lint + both suites |
-| `just validator` | run a local test validator |
+| `just up` | start validator, deploy, and API — everything, idempotent |
+| `just down` | stop what `just up` started |
+| `just status` | what's running, and how many escrows are indexed |
+| `just demo` | run the whole loop live in this terminal |
+| `just validator` | run a local test validator in the foreground |
 | `just fund [amount]` | airdrop to donor and recipient (local only) |
 | `just deploy` | build and deploy |
 | `just api` | run the API server |
@@ -398,6 +448,14 @@ supported path, not a fault; the API logs a warning at boot.
 
 **`just hash need` complains about an unexpected argument.** You're on an old
 checkout — the recipe used to word-split its arguments.
+
+**Every instruction fails with `DeclaredProgramIdMismatch`.** `declare_id!`
+and the keypair you deployed with are different keys. This happens most easily
+by running `anchor keys sync`, which writes `target/deploy/cairn-keypair.json`
+into `declare_id!` while `just deploy` uses `.demo/program.json`. Run
+`just sync-id` — it now writes the same key to all three places. `just deploy`
+also refuses to ship a mismatched program rather than letting you find out one
+failed transaction later.
 
 **`anchor build` fails with `Unknown release: 3.1.0`.** `Anchor.toml` used to
 pin `solana_version` to a release that was never published, and `anchor build`
