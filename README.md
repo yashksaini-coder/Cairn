@@ -39,19 +39,6 @@ the chain binds it to the transfer.
 
 <img src="assets/Icon.png" align="right" width="132" alt="The Cairn mark: five stones stacked, widest at the base">
 
-## The name
-
-A cairn is a stack of stones raised by travellers along a route. Each
-passer-by adds one. It proves someone came through, and it guides whoever
-comes next. Nobody owns it, nobody supervises it, and anyone who walks up can
-read it.
-
-Every clause of that maps onto something the software does. Each passer-by
-adds one — every release appends a receipt nobody can remove. Nobody owns it —
-there is no operator key and no admin override. Anyone can read it —
-verification runs offline, on a stranger's laptop, against artifacts they
-fetched themselves.
-
 <br clear="right">
 
 ## The part that isn't obvious
