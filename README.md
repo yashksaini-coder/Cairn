@@ -37,10 +37,6 @@ transaction carries a hash of a recording where they say, in their own words,
 what they got. The receipt comes from the person at the end of the chain, and
 the chain binds it to the transfer.
 
-<img src="assets/Icon.png" align="right" width="132" alt="The Cairn mark: five stones stacked, widest at the base">
-
-<br clear="right">
-
 ## The part that isn't obvious
 
 Two things look similar here and are not.
